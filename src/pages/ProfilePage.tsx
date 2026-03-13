@@ -1,0 +1,352 @@
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { 
+  Activity, 
+  Calendar, 
+  Clock, 
+  Heart, 
+  MessageCircle, 
+  Settings, 
+  LogOut,
+  User,
+  ChevronRight,
+  TrendingUp
+} from 'lucide-react';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+} from 'chart.js';
+import CalendarComponent from '../components/Calendar';
+import ReadinessMeter from '../components/ReadinessMeter';
+import axios from 'axios';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+interface UserProfile {
+  username: string;
+  email: string;
+  joinDate: string;
+  lastActive: string;
+  totalSessions: number;
+  favoriteTherapy: string;
+}
+
+interface AssessmentResult {
+  date: string;
+  score: number;
+  recommendation: string;
+  recommendedTherapy: string;
+}
+
+const ProfilePage: React.FC = () => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [assessmentHistory, setAssessmentHistory] = useState<AssessmentResult[]>([]);
+  const [readinessData, setReadinessData] = useState<any>(null);
+
+  useEffect(() => {
+    if (user) {
+      const results = localStorage.getItem(`sentiscope_history_${user.username}`);
+      if (results) {
+        setAssessmentHistory(JSON.parse(results));
+      }
+      
+      // Fetch readiness data
+      fetchReadinessData();
+      
+      // Refresh on visibility change (when user returns to tab)
+      const handleVisibilityChange = () => {
+        if (!document.hidden) {
+          fetchReadinessData();
+        }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      // Poll every 10 seconds
+      const interval = setInterval(() => {
+        fetchReadinessData();
+      }, 10000);
+      
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        clearInterval(interval);
+      };
+    }
+  }, [user]);
+  
+  const fetchReadinessData = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:5000/api/user/readiness', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setReadinessData(response.data);
+    } catch (error) {
+      console.error('Error fetching readiness:', error);
+    }
+  };
+
+  // If no user is logged in, redirect to login
+  if (!user) {
+    navigate('/login');
+    return null;
+  }
+
+  // Mock data - replace with actual user data from your backend
+  const profileData: UserProfile = {
+    username: user.username,
+    email: user.email || 'user@example.com',
+    joinDate: new Date().toLocaleDateString(),
+    lastActive: 'Just now',
+    totalSessions: assessmentHistory.length,
+    favoriteTherapy: assessmentHistory.length > 0 
+      ? assessmentHistory[assessmentHistory.length - 1].recommendedTherapy 
+      : 'Audio Therapy'
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const moodHistory = {
+    labels: assessmentHistory.map(result => new Date(result.date).toLocaleDateString()),
+    datasets: [
+      {
+        label: 'Mood Score',
+        data: assessmentHistory.map(result => result.score),
+        borderColor: '#EAB308',
+        backgroundColor: 'rgba(234, 179, 8, 0.1)',
+        tension: 0.4,
+        fill: true
+      }
+    ]
+  };
+
+  const options = {
+    responsive: true,
+    plugins: {
+      legend: {
+        display: false
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: 'rgba(255, 255, 255, 0.7)'
+        }
+      },
+      x: {
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        },
+        ticks: {
+          color: 'rgba(255, 255, 255, 0.7)'
+        }
+      }
+    }
+  };
+
+  const generateMoodAnalysis = () => {
+    if (assessmentHistory.length === 0) {
+      return "You haven't taken any mood assessments yet. Try taking one to track your emotional well-being!";
+    }
+
+    const scores = assessmentHistory.map(result => result.score);
+    const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const trend = scores[scores.length - 1] - scores[0];
+    const trendPercentage = Math.round((trend / scores[0]) * 100);
+
+    let analysis = `Your mood has shown a ${trendPercentage > 0 ? 'positive' : 'negative'} trend over the past ${assessmentHistory.length} assessments, with an overall ${trendPercentage > 0 ? 'improvement' : 'decline'} of ${Math.abs(trendPercentage)}%. `;
+    
+    if (average >= 70) {
+      analysis += "You're maintaining a generally positive outlook. Keep up the good work!";
+    } else if (average >= 50) {
+      analysis += "You're experiencing moderate emotional well-being. Consider exploring some of our therapy options to boost your mood.";
+    } else {
+      analysis += "You might be going through a challenging period. We recommend trying our therapy services to help improve your emotional well-being.";
+    }
+
+    return analysis;
+  };
+
+  return (
+    <div className="min-h-screen bg-stress-dark py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column - Calendar */}
+          <div className="lg:col-span-1">
+            <CalendarComponent />
+          </div>
+
+          {/* Right Column - Profile Content */}
+          <div className="lg:col-span-2">
+            {/* Profile Header */}
+            <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-cyan-400/20">
+              <div className="flex items-center space-x-6">
+                <div className="relative">
+                  <div className="w-24 h-24 rounded-full bg-cyan-400/20 flex items-center justify-center">
+                    <User className="w-12 h-12 text-cyan-400" />
+                  </div>
+                  <button className="absolute bottom-0 right-0 bg-cyan-400 text-black p-2 rounded-full hover:bg-cyan-300 transition-colors">
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-white mb-2">{profileData.username}</h1>
+                  <p className="text-cyan-400/80">{profileData.email}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="bg-black/40 backdrop-blur-sm rounded-xl p-6 border border-cyan-400/20">
+                <div className="flex items-center space-x-4">
+                  <div className="p-3 bg-cyan-400/20 rounded-lg">
+                    <Activity className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-cyan-400/80">Total Sessions</p>
+                    <p className="text-2xl font-bold text-white">{profileData.totalSessions}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-black/40 backdrop-blur-sm rounded-xl p-6 border border-cyan-400/20">
+                <div className="flex items-center space-x-4">
+                  <div className="p-3 bg-cyan-400/20 rounded-lg">
+                    <Heart className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-cyan-400/80">Favorite Therapy</p>
+                    <p className="text-2xl font-bold text-white">{profileData.favoriteTherapy}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Readiness Meter */}
+            {readinessData && (
+              <div className="mb-8">
+                <ReadinessMeter readinessData={readinessData} />
+              </div>
+            )}
+
+            {/* Sentiscope History */}
+            <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-cyan-400/20">
+              <h2 className="text-xl font-bold text-white mb-6">Sentiscope History</h2>
+              <div className="space-y-6">
+                <div className="bg-black/20 rounded-xl p-6">
+                  <div className="h-64">
+                    {assessmentHistory.length > 0 ? (
+                      <Line data={moodHistory} options={options} />
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-white/70">
+                        No mood assessment history available yet.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="bg-black/20 rounded-xl p-6">
+                  <div className="flex items-center space-x-3 mb-3">
+                    <TrendingUp className="w-5 h-5 text-cyan-400" />
+                    <h3 className="text-lg font-semibold text-white">Mood Analysis</h3>
+                  </div>
+                  <p className="text-white/90 leading-relaxed">
+                    {generateMoodAnalysis()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Activity */}
+            <div className="bg-black/40 backdrop-blur-sm rounded-2xl p-8 mb-8 border border-cyan-400/20">
+              <h2 className="text-xl font-bold text-white mb-6">Recent Activity</h2>
+              <div className="space-y-4">
+                {assessmentHistory.slice(-3).reverse().map((result, index) => (
+                  <div key={index} className="flex items-center justify-between p-4 bg-black/20 rounded-lg hover:bg-black/30 transition-colors">
+                    <div className="flex items-center space-x-4">
+                      <div className="p-2 bg-cyan-400/20 rounded-lg">
+                        <Activity className="w-5 h-5 text-cyan-400" />
+                      </div>
+                      <div>
+                        <p className="text-white">Mood Assessment - {result.score}%</p>
+                        <p className="text-sm text-cyan-400/80">{new Date(result.date).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-cyan-400/60" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Quick Access Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <button
+                onClick={() => navigate('/diary')}
+                className="bg-gradient-to-br from-cyan-400/20 to-cyan-500/10 backdrop-blur-sm rounded-2xl p-6 border border-cyan-400/30 hover:border-cyan-400/50 transition-all group text-left"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-cyan-400/20 rounded-lg group-hover:scale-110 transition-transform">
+                    <span className="text-3xl">📔</span>
+                  </div>
+                  <ChevronRight className="w-6 h-6 text-cyan-400/60 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Personal Diary</h3>
+                <p className="text-white/70 text-sm">Write your thoughts in a secure, password-protected journal</p>
+              </button>
+
+              <button
+                onClick={() => navigate('/mood-assessment')}
+                className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 backdrop-blur-sm rounded-2xl p-6 border border-blue-500/30 hover:border-blue-500/50 transition-all group text-left"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="p-3 bg-blue-500/20 rounded-lg group-hover:scale-110 transition-transform">
+                    <Activity className="w-6 h-6 text-blue-500" />
+                  </div>
+                  <ChevronRight className="w-6 h-6 text-blue-500/60 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Sentiscope</h3>
+                <p className="text-white/70 text-sm">Take a mood assessment and get personalized recommendations</p>
+              </button>
+            </div>
+
+            {/* Logout Button */}
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center space-x-2 bg-red-500/20 hover:bg-red-500/30 text-red-500 px-6 py-3 rounded-xl transition-colors border border-red-500/20"
+            >
+              <LogOut className="w-5 h-5" />
+              <span>Logout</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ProfilePage; 
