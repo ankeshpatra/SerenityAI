@@ -30,9 +30,10 @@ Complete technical documentation of system design, data flows, and implementatio
 │  │  - Pages, Components, Context                             │  │
 │  │  - Real-time UI updates via polling                       │  │
 │  │  - Progressive Trust UI gating                            │  │
+│  │  - WebSockets for Gemini Live API Voice                   │  │
 │  └────────┬────────────────────────────────────────┬─────────┘  │
 └───────────┼────────────────────────────────────────┼────────────┘
-            │ Axios HTTP Requests                    │ Google OAuth
+            │ Axios HTTP & WebSockets                │ Google OAuth
             │ (JWT in Authorization header)          │ Redirect Flow
             ▼                                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -110,7 +111,7 @@ Serenity AI uses a **4-phase progression system** to gradually introduce users t
 
 | Component | Weight | Max Score | How to Earn |
 |-----------|--------|-----------|-------------|
-| **Chat Sessions** | 30% | 30 | Each Pulse conversation adds 5 points (max 6 sessions) |
+| **Chat Sessions** | 30% | 30 | Each Amy conversation adds 5 points (max 6 sessions) |
 | **Therapy Adoption** | 25% | 25 | Visit each therapy type (Audio, Physical, Laughing, Reading) = 6.25 points each |
 | **Engagement Days** | 20% | 20 | Logarithmic growth: `min(20, 10 * log10(days + 1))` |
 | **Mood Stability** | 15% | 15 | Complete Sentiscope assessments, average mood score |
@@ -156,8 +157,9 @@ function determinePhase(readiness) {
 | **React Router** | 6.26.1 | Client-side routing | `src/App.tsx` (routes) |
 | **Tailwind CSS** | 3.4.10 | Utility-first styling | `tailwind.config.js`, `src/index.css` |
 | **Framer Motion** | 11.3.31 | Animations | Phase transitions, hover effects |
+| **GSAP** | 3.12.5 | Complex UI Animations | `src/components/DotGrid.tsx` |
+| **Three.js & VRM** | 0.169.0 | 3D Mascot Rendering | `src/components/Mascot/*` |
 | **Axios** | 1.7.7 | HTTP client | `src/pages/*.tsx` (API calls) |
-| **Vanta.js** | 0.5.24 | Animated backgrounds | `src/components/VantaBackground.tsx` |
 
 ### **Backend Technologies**
 
@@ -177,8 +179,9 @@ function determinePhase(readiness) {
 
 | Service | Model | Purpose | API Endpoint |
 |---------|-------|---------|--------------|
-| **Google Gemini** | gemini-2.0-flash-exp | Chat with Amy | `generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent` |
-| **Google Gemini** | gemini-pro | Therapy recommendations (Sentiscope) | `generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent` |
+| **Google Gemini Live API** | gemini-2.0-flash-exp | Real-time Voice Chat with Amy | `wss://generativelanguage.../ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent` |
+| **Google Gemini API** | gemini-2.5-flash-lite | Text Chat with Amy | `generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent` |
+| **Google Gemini API** | gemini-2.5-flash | Therapy recommendations (Sentiscope) | `generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent` |
 
 ---
 
@@ -230,7 +233,7 @@ Register new user with email/password.
 ```
 
 **Special Case: Admin Account**
-If email is `admin@Serenity AI.com` and password is `Serenity AIAdmin2025!`:
+If email is `admin@serenityai.com` and password is `SerenityAIAdmin2025!`:
 - Automatically set `readinessScore: 100`, `phase: "full-access"`
 - Pre-populate engagement metrics (6 chat sessions, 4 therapy types, 30 days)
 
@@ -670,6 +673,33 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
+## 3D Mascot Architecture (Amy)
+
+The core distinguishing feature of Serenity AI is "Amy" — a real-time, 3D interactive avatar. Her architecture is built on a specialized rendering and animation stack that synchronizes with Google's Gemini Multimodal Live API.
+
+### **Rendering Stack**
+- **Three.js Canvas**: The fundamental WebGL rendering context.
+- **@pixiv/three-vrm**: An extension for Three.js that parses and renders `.vrm` files (a 3D avatar standard based on glTF).
+- **GSAP**: Handles fluid interpolation between animation states (e.g., smoothly transitioning an arm from "resting" to "waving").
+
+### **Component Breakdown (`src/components/Mascot`)**
+1. **`MascotScene.tsx`**: The React entry point. It initializes the Three.js `<canvas>`, mounts the camera, handles lighting, and delegates the render loop to `MascotController`.
+2. **`MascotController.ts`**: The "brain" of the visual representation. It:
+   - Loads the `models/waifu.vrm` file.
+   - Updates the physics simulation (hair/clothing sway) via `vrm.update()` on every frame.
+   - Exposes public methods to trigger animations (e.g., `playAnimation('wave')`, `setExpression('happy')`).
+3. **`MascotAnimations.ts`**: A library of predefined skeletal poses and facial expressions (Blendshapes).
+   - **Blendshapes**: Controls facial geometry like `Relaxed`, `Neutral`, `Joy`, `Sorrow`, `Angry`, and lip-sync shapes (`Aa`, `Ih`, `Ou`, `Ee`, `Oh`).
+   - **Bone Rotations**: Controls skeletal nodes like `rightShoulder`, `leftUpperArm`, `neck`, etc., to create poses (waving, shrugging, thinking).
+
+### **Voice and Lip-Sync Integration**
+When using the Gemini Live API via WebSockets (`ChatWithPulse.tsx`):
+1. User speaks into the microphone -> send PCM audio buffer to Gemini via WebSocket.
+2. Gemini processes the audio and streams back an audio response + text.
+3. As the audio plays via the Web Audio API, the system can extract volume data or rely on AI-provided text cues to trigger corresponding `MascotController` methods, animating her mouth and facial expressions in real-time.
+
+---
+
 ## Frontend Architecture
 
 ### **Component Hierarchy**
@@ -677,7 +707,7 @@ Authorization: Bearer <JWT_TOKEN>
 ```
 App.tsx (Routes)
 ├── Home.tsx
-│   ├── VantaBackground.tsx (Animated background)
+│   ├── DotGrid.tsx (GSAP Animated background)
 │   └── Typewriter.tsx (Animated text)
 ├── SignUp.tsx
 │   ├── GoogleOAuthButton.tsx
@@ -687,9 +717,11 @@ App.tsx (Routes)
 ├── ProfilePage.tsx
 │   ├── ReadinessMeter (4-phase staircase UI)
 │   └── Engagement stats display
-├── ChatWithPulse.tsx (src/features/chat/)
-│   ├── Voice input button
-│   └── Gemini API integration
+├── MascotPage.tsx
+│   ├── MascotScene.tsx (Three.js Canvas)
+│   └── ChatWithPulse.tsx (src/features/chat/)
+│       ├── Voice input button (WebSocket)
+│       └── Gemini API integration
 ├── MoodAssessmentPage.tsx
 │   ├── MoodAssessment.tsx (5-question form)
 │   └── AI recommendation display
@@ -1056,12 +1088,11 @@ phase = "community-readonly" (since 64.91 is between 40 and 70)
 
 ## 📊 Future Architecture Enhancements
 
-1. **WebSocket Integration**: Real-time chat updates (currently poll-based)
-2. **Redis Caching**: Cache readiness scores for 1-minute TTL
-3. **ML Toxicity Detection**: Replace keyword matching with Perspective API
-4. **Microservices**: Separate auth, chat, and recommendation services
-5. **CDN for Static Assets**: Optimize therapy media delivery
-6. **Analytics Pipeline**: Track user journeys for insights
+1. **Redis Caching**: Cache readiness scores for 1-minute TTL
+2. **ML Toxicity Detection**: Replace keyword matching with Perspective API
+3. **Microservices**: Separate auth, chat, and recommendation services
+4. **CDN for Static Assets**: Optimize therapy media delivery
+5. **Analytics Pipeline**: Track user journeys for insights
 
 ---
 
